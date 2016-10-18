@@ -1,0 +1,216 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "DevSecOps Bootcamp CloudFormation Template: Creates a rescilient infrastructure to host a vulnerable application.",
+  "Parameters": {
+    "StackCreator": {
+      "Type": "String",
+      "Description": "You, the stack creator, e.g., student1"
+    },
+    "TimeStamp": {
+      "Type": "String",
+      "Description": "Timestamp overwritten by restacker"
+    },
+    "StudentId": {
+      "Type": "String",
+      "Description": "Your student id, e.g., student1"
+    },
+    "KeyName": {
+      "Type": "AWS::EC2::KeyPair::KeyName",
+      "Description": "Name of an existing EC2 KeyPair to enable SSH access to the instance"
+    },
+    "AppSubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "A subnet ID where the app will run"
+    },
+    "ElbSubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Description": "A subnet ID where the app will run"
+    },
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Description": "A VPC ID where the app will run"
+    },
+    "InstanceType": {
+      "Description": "WebServer EC2 instance type",
+      "Type": "String",
+      "Default": "m3.medium"
+    },
+    "AmiId": {
+      "Description": "The AMI (Amazon Machine Image) ID",
+      "Type": "AWS::EC2::Image::Id"
+    },
+    "AppSecurityGroup": {
+      "Description": "The Web application security group ID",
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    },
+    "ElbSecurityGroups": {
+      "Description": "The ELB security group ID",
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    }
+  },
+  "Resources": {
+    "ScalingGroup": {
+      "Type": "AWS::AutoScaling::AutoScalingGroup",
+      "Properties": {
+        "VPCZoneIdentifier": [
+          {
+            "Ref": "AppSubnetId"
+          }
+        ],
+        "LaunchConfigurationName": {
+          "Ref": "WebServerInstance"
+        },
+        "LoadBalancerNames": [
+          {
+            "Ref": "StudentId"
+          }
+        ],
+        "MinSize": "1",
+        "DesiredCapacity": "1",
+        "MaxSize": "1",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Ref": "StudentId"
+            },
+            "PropagateAtLaunch": "true"
+          }
+        ]
+      }
+    },
+    "WebServerInstance": {
+      "Type": "AWS::AutoScaling::LaunchConfiguration",
+      "Properties": {
+        "SecurityGroups": [
+          {
+            "Ref": "AppSecurityGroup"
+          }
+        ],
+        "ImageId": {
+          "Ref": "AmiId"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "KeyName": {
+          "Ref": "KeyName"
+        },
+        "UserData": {
+          "Fn::Base64": {
+            "Fn::Join": [
+              "",
+              [
+                "#!/bin/bash -xe\n",
+                "export http_proxy=http://proxy:3128\n",
+                "export https_proxy=http://proxy:3128\n",
+                "rpm -ivh https://dl.fedoraproject.org/pub/epel/7/x86_64/e/epel-release-7-7.noarch.rpm\n",
+                "yum -y install git git-core zlib zlib-devel gcc-c++ patch readline readline-devel libyaml-devel libffi-devel openssl-devel make bzip2 autoconf automake libtool bison curl sqlite-devel\n",
+                "yum -y install nodejs mariadb mariadb-server mariadb-devel\n",
+                "systemctl enable mariadb.service\n",
+                "systemctl start mariadb.service\n",
+                "rpm -ivh https://s3-us-west-2.amazonaws.com/dso-public-bucket/ruby-2.3.1-1.el7.x86_64.rpm\n",
+                "cd /home/ec2-user\n",
+                "echo \"export GEM_HOME=~/.gem\" >> .bash_profile\n",
+                "echo \"export GEM_PATH=~/.gem\" >> .bash_profile\n",
+                "echo \"export RAILS_ENV=rds\" >> .bash_profile\n",
+                "echo \"export PATH=~/.gem/bin:$PATH\" >> .bash_profile\n",
+                "echo \"export http_proxy=http://proxy:3128\" >> .bash_profile\n",
+                "echo \"export https_proxy=http://proxy:3128\" >> .bash_profile\n",
+                "echo \"export no_proxy=localhost,127.0.0.1,254.169.254.169\" >> .bash_profile\n",
+                "echo \"[http]\n    proxy = $http_proxy\" >> .gitconfig\n",
+                "chown ec2-user: .gitconfig\n",
+                "su -l -c \"git clone https://github.com/OWASP/railsgoat.git\" ec2-user\n",
+                "su -l -c \"gem install bundler\" ec2-user\n",
+                "cd railsgoat\n",
+                "cat <<EOF>> config/database.yml\n",
+                "rds:\n",
+                "  adapter: mysql2\n",
+                "  database: railsgoatdb\n",
+                "  pool: 5\n",
+                "  timeout: 5000\n",
+                "  host: railsgoatdb.cfkyvk9ybkal.us-west-2.rds.amazonaws.com\n",
+                "  username: railsgoat\n",
+                "  password: dsogoat1\n",
+                "EOF\n",
+                "su -l -c \"cd railsgoat && bundle install && bundle exec rake db:setup\" ec2-user\n",
+                "su -l -c \"cd railsgoat && bundle exec rails server -b 0.0.0.0 -p 8080 &\" ec2-user\n",
+                "ln -sf /usr/share/zoneinfo/America/Los_Angeles /etc/localtime\n",
+                "yum -y install wget\n",
+                "cd /opt\n",
+                "wget -O splunkforwarder-6.4.1-debde650d26e-linux-2.6-x86_64.rpm 'https://www.splunk.com/bin/splunk/DownloadActivityServlet?architecture=x86_64&platform=linux&version=6.4.1&product=universalforwarder&filename=splunkforwarder-6.4.1-debde650d26e-linux-2.6-x86_64.rpm&wget=true'\n",
+                "rpm -ivh splunkforwarder-6.4.1-debde650d26e-linux-2.6-x86_64.rpm\n",
+                "echo \"[tcpout]\n",
+                "defaultGroup = dso-autolb-group\n",
+                "\n",
+                "[tcpout:dso-autolb-group]\n",
+                "disabled = false\n",
+                "dropEventsOnQueueFull = 10\n",
+                "server = appliance:9997\n",
+                "sslCertPath = \\$SPLUNK_HOME/etc/auth/server.pem\n",
+                "sslPassword = password\n",
+                "sslRootCAPath = \\$SPLUNK_HOME/etc/auth/cacert.pem\n",
+                "sslVerifyServerCert = false\n",
+                "useACK = false\" >> /opt/splunkforwarder/etc/system/local/outputs.conf\n",
+                "\n",
+                "echo \"[default]\n",
+                "host = \\\\$decideOnStartup\n",
+                "\n",
+                "[monitor:///home/ec2-user/railsgoat/log/]\n",
+                "recursive=true\n",
+                "\n",
+                "[monitor:///var/log/]\n",
+                "recursive=true\" >> /opt/splunkforwarder/etc/system/local/inputs.conf\n",
+                "/opt/splunkforwarder/bin/splunk start --accept-license\n",
+                "/opt/splunkforwarder/bin/splunk enable boot-start\n"
+              ]
+            ]
+          }
+        }
+      }
+    },
+    "ServiceLoadBalancer": {
+      "Type": "AWS::ElasticLoadBalancing::LoadBalancer",
+      "Properties": {
+        "LoadBalancerName": {
+          "Ref": "StudentId"
+        },
+        "CrossZone": "true",
+        "HealthCheck": {
+          "HealthyThreshold": "3",
+          "Interval": "30",
+          "Target": "TCP:8080",
+          "Timeout": "5",
+          "UnhealthyThreshold": "5"
+        },
+        "Listeners": [
+          {
+            "InstancePort": "8080",
+            "InstanceProtocol": "TCP",
+            "LoadBalancerPort": "80",
+            "Protocol": "TCP"
+          }
+        ],
+        "Scheme": "internet-facing",
+        "SecurityGroups": [
+          {
+            "Ref": "ElbSecurityGroups"
+          }
+        ],
+        "Subnets": [
+          {
+            "Ref": "ElbSubnetId"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Ref": "StudentId"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
